@@ -1,6 +1,7 @@
 #include "main.h"
 #include <unistd.h>
 
+
 #define MAX_ALIAS_SIZE 100
 
 typedef struct alias {
@@ -76,7 +77,6 @@ int execute_builtin(char **argv) {
         return 1;
     }
     if (strcmp(argv[0], "clear") == 0) {
-        
         printf("\033[H\033[J");
         return 1;
     }
@@ -108,18 +108,10 @@ int execute_external(char **argv) {
         return 0;
     }
     if (pid == 0) {
-        char *path = getenv("PATH");
-        char *token = strtok(path, ":");
-        while (token != NULL) {
-            char full_path[1024];
-            snprintf(full_path, sizeof(full_path), "%s/%s", token, argv[0]);
-            if (execve(full_path, argv, NULL) != -1) {
-                exit(0);
-            }
-            token = strtok(NULL, ":");
+        if (execvp(argv[0], argv) == -1) {
+            fprintf(stderr, "%s: command not found\n", argv[0]);
+            exit(1);
         }
-        fprintf(stderr, "%s: command not found\n", argv[0]);
-        exit(1);
     } else {
         int status;
         waitpid(pid, &status, 0);
@@ -128,28 +120,53 @@ int execute_external(char **argv) {
 }
 
 void suggest_command(char *cmd) {
-    //extern char **environ;
     char *path = getenv("PATH");
-    char *token = strtok(path, ":");
+    if (!path) {
+      printf("%s: command not found\n", cmd);
+        return;
+    }
+
+   
+    char *path_copy = strdup(path);
+    if (!path_copy) {
+        perror("Failed to allocate memory for path copy");
+        return;
+    }
+
+    char *token = strtok(path_copy, ":");
+
 
     printf("%s: command not found\n", cmd);
     printf("Did you mean:\n");
 
+    
+    int suggestions = 0;
     while (token != NULL) {
         char full_path[1024];
         snprintf(full_path, sizeof(full_path), "%s/%s", token, cmd);
         
+        
         if (access(full_path, X_OK) == 0) {
             printf("    %s\n", full_path);
+            suggestions++;
+            if (suggestions >= 5) {  
+                break;
+            }
         }
         
         token = strtok(NULL, ":");
     }
+
+    if (suggestions == 0) {
+        printf("    (no suggestions)\n");
+    }
+
+    free(path_copy);
 }
+
 
 int main(int ac, char **argv) {
     (void)ac;
-
     setenv("SHELL", "./bitsh", 1);
     char *prompt = "$ ";
     char *lineptr = NULL;
@@ -214,13 +231,11 @@ int main(int ac, char **argv) {
 
         argv[i] = NULL;
 
-
         char *alias_command = get_alias(argv[0]);
         if (alias_command != NULL) {
             printf("Alias: %s -> %s\n", argv[0], alias_command);
             argv[0] = strtok(alias_command, delim);
         }
-
 
         if (execute_builtin(argv) == -1) {
             break;
@@ -234,11 +249,10 @@ int main(int ac, char **argv) {
         for (i = 0; argv[i] != NULL; i++) {
             free(argv[i]);
         }
-
+        free(argv);
     }
 
     free_aliases();
-    free(argv);
     free(lineptr);
     free(lineptr_copy);
     return 0;
